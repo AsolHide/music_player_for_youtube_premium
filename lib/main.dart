@@ -7,6 +7,26 @@ import 'dart:math';
 import 'filepicker.dart';
 import 'myiconbutton.dart';
 
+List<List<dynamic>> GetURLList(eList,count){
+  return eList[eList.keys.elementAt(count)];
+}
+
+List<List<dynamic>> shufflePlaylistWithRandomValues(List<List<dynamic>> urllist) {
+  var random = Random();
+
+  debugPrint("$urllist");
+  // 各要素についてランダムな値を生成
+  List<List<dynamic>> newurllist = urllist.map((item) {
+    double randomValue = random.nextDouble() * (item[2].value - item[1].value) + item[1].value; // item[1] と item[2] の間のランダムな値
+    return [item[0], randomValue];
+  }).toList();
+
+  // リストをシャッフル
+  newurllist.shuffle(random);
+
+  return newurllist;
+} 
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([
@@ -66,6 +86,8 @@ class InitPageState extends State<InitPage> {
     (data: {}, success: false, message: "まだファイルが選択されていません");
 
   String snack_message="";
+  String appbar_message="AutoPlayer";
+  double appbar_message_size=25;
 
   int play_count=0;
   int sheet_count=0;
@@ -85,6 +107,25 @@ class InitPageState extends State<InitPage> {
 
   int current_timer=0;
   bool trigger=false;
+  Timer timer=Timer.periodic(Duration(milliseconds: 1000), (timer) async {});
+
+  void update_appbar_status(){
+    if (isplay){
+      setState(() {
+        appbar_message=file_pick_result.data.keys.elementAt(sheet_count)+"（"+(play_count+1).toString()+"/"+shuffled_urllist.length.toString()+"）";
+        if (appbar_message.length>15){
+          appbar_message_size=375.0/appbar_message.length;
+        }else{
+          appbar_message_size=25;
+        }
+      });
+    }else{
+      setState(() {
+        appbar_message_size=25;
+        appbar_message="AutoPlayer";
+      });
+    }
+  }
   
   @override
     void initState() {
@@ -96,12 +137,16 @@ class InitPageState extends State<InitPage> {
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageFinished: (String url) async {
+              timer?.cancel();
               if (!isautoplay){
                 controller.runJavaScript("""document.querySelector("video").pause();""");//自動再生オフにしたい場合はこれ！
               }
               if (isplay){
                 trigger=false;
-                Timer? timer =Timer.periodic(Duration(milliseconds: 800), (timer) async {
+                timer = Timer.periodic(Duration(milliseconds: 800), (timer) async {
+                  if (!isplay){
+                    timer.cancel();
+                  }
                   var currentTimer= await controller.runJavaScriptReturningResult('document.querySelector("video").currentTime;');
                   debugPrint("$currentTimer");
                   if (currentTimer is double){
@@ -113,12 +158,24 @@ class InitPageState extends State<InitPage> {
                       }
                     }
                     if (currentTimer>shuffled_urllist[play_count][1]){
-                      play_count++;
-                      if (play_count>=urllist.length){
-                        play_count=0;
-                      }
-                      controller.loadRequest(Uri.parse(shuffled_urllist[play_count][0]));
                       timer.cancel();
+                      play_count++;
+                      if (play_count>=urllist.length){//曲が最後まで言ったら
+                        play_count=0;
+                        //リストが２つ以上だったら次のリストの再生準備（リスト取得、シャッフル）。逆にリストが１つだったらそのリストをシャッフルせずに再生し続ける。                        
+                        if (file_pick_result.data.keys.length>1){
+                          sheet_count++;
+                          if (sheet_count>=file_pick_result.data.keys.length){
+                            sheet_count=0;
+                          }
+                          urllist=GetURLList(file_pick_result.data,sheet_count);
+                          shuffled_urllist=shufflePlaylistWithRandomValues(urllist);
+                        }
+                      }
+                      //次に流す曲の情報を更新
+                      update_appbar_status();
+
+                      controller.loadRequest(Uri.parse(shuffled_urllist[play_count][0]));
                     }
                   }
                 });
@@ -133,25 +190,7 @@ class InitPageState extends State<InitPage> {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
 
-    List<List<dynamic>> GetURLList(eList,count){
-      return eList[eList.keys.elementAt(count)];
-    }
-
-    List<List<dynamic>> shufflePlaylistWithRandomValues(List<List<dynamic>> urllist) {
-      var random = Random();
-
-      debugPrint("$urllist");
-      // 各要素についてランダムな値を生成
-      List<List<dynamic>> newurllist = urllist.map((item) {
-        double randomValue = random.nextDouble() * (item[2].value - item[1].value) + item[1].value; // item[1] と item[2] の間のランダムな値
-        return [item[0], randomValue];
-      }).toList();
-
-      // リストをシャッフル
-      newurllist.shuffle(random);
-
-      return newurllist;
-    } 
+    
 
     void FilePick()async{
       var result= await pickFile();
@@ -166,22 +205,30 @@ class InitPageState extends State<InitPage> {
         ));
     }
 
-    void StartMusic()async{
-      setState(() {
-        isplay=true;
-      });
-      urllist=GetURLList(file_pick_result.data,sheet_count);
-      shuffled_urllist=shufflePlaylistWithRandomValues(urllist);
-      debugPrint("$shuffled_urllist");
-      controller.loadRequest(Uri.parse(shuffled_urllist[play_count][0]));
+    void ControlMusic()async{
+      if (!isplay) {
+        setState(() {
+          isplay=true;
+        });
+        urllist=GetURLList(file_pick_result.data,sheet_count);
+        shuffled_urllist=shufflePlaylistWithRandomValues(urllist);
+        update_appbar_status();
+        controller.loadRequest(Uri.parse(shuffled_urllist[play_count][0]));
+      }else{
+        setState(() {
+          isplay=false;
+        });
+        controller.loadRequest(Uri.parse("https://m.youtube.com"));
+      }
+      
     }
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: MyColor.primary,
-        title: Text("AutoPlayer"),
+        title: Text(appbar_message,style: TextStyle(fontSize: appbar_message_size,),),
         actions: [
-          StartMusicButton(file_pick_result.success, StartMusic),
+          StartMusicButton(file_pick_result.success,isplay, ControlMusic),
           FilePickButton(FilePick),
           ],
       ),

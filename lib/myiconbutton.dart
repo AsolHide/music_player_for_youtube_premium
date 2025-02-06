@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-Widget StartMusicButton(bool isload, VoidCallback func) {
+Widget StartMusicButton(bool isload,bool isplay, VoidCallback func) {
   return Visibility(
     visible: isload,
     child: TweenAnimationBuilder<double>(
@@ -15,7 +15,9 @@ Widget StartMusicButton(bool isload, VoidCallback func) {
       },
       child: IconButton(
         onPressed: func,
-        icon: Icon(Icons.play_arrow_outlined, size: 36, color: Colors.greenAccent),
+        icon: isplay
+        ?Icon(Icons.pause_outlined, size: 36, color: Colors.redAccent)
+        :Icon(Icons.play_arrow_outlined, size: 36, color: Colors.greenAccent),
       ),
     ),
   );
