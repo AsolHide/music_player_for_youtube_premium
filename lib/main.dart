@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
-import 'dart:developer';
-import 'package:file_picker/file_picker.dart';
-import 'package:excel/excel.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-//import 'package:webview_flutter_plus/webview_flutter_plus.dart';
 import 'package:flutter/services.dart';
 import 'mycolor.dart';
 import 'dart:async';
-
+import 'dart:math';
+import 'filepicker.dart';
+import 'myiconbutton.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +19,7 @@ void main() {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -61,22 +59,22 @@ class InitPage extends StatefulWidget {
 class InitPageState extends State<InitPage> {
   List<List<dynamic>> PlayList=[];
 
-  String? fileName="未選択";
-  Map<String, List<List<dynamic>>> excelData = {};
-  int sheetnum=0;
-  bool isload=false;
   bool isplay=false;
+  bool isautoplay=true;
+
+  ({Map<String, List<List<dynamic>>> data, bool success, String message}) file_pick_result = 
+    (data: {}, success: false, message: "まだファイルが選択されていません");
+
+  String snack_message="";
 
   int play_count=0;
+  int sheet_count=0;
 
   String url_now="";
   int sec_now=0;
 
-  List urllist=[
-    ["https://youtu.be/09vT1DxxEcc?t=0",30],
-    ["https://youtu.be/TYQkEbI8p-Y?t=0",30],
-    ["https://youtu.be/lv29JX3ttLE?t=0",7]
-  ];
+  List<List<dynamic>> urllist=[];
+  List<List<dynamic>> shuffled_urllist=[];
 
   late WebViewController controller;
 
@@ -88,38 +86,41 @@ class InitPageState extends State<InitPage> {
   int current_timer=0;
   bool trigger=false;
   
-  
   @override
     void initState() {
       super.initState();
 
       controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted) // JavaScript有効化
-        //..setUserAgent("Mozilla/5.0 (Linux; Android 10; Pixel 4 XL) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36") // PC版を開く
         ..loadRequest(Uri.parse("https://m.youtube.com")) // YouTubeのモバイル版を開く
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageFinished: (String url) async {
+              if (!isautoplay){
+                controller.runJavaScript("""document.querySelector("video").pause();""");//自動再生オフにしたい場合はこれ！
+              }
               if (isplay){
                 trigger=false;
-                //Future.delayed(Duration(milliseconds: 600), () {controller.runJavaScript('document.querySelector("video").muted = false;',);});
-                Timer? timer =Timer.periodic(Duration(milliseconds: 500), (timer) async {
-                  var current_timer= await controller.runJavaScriptReturningResult('document.querySelector("video").currentTime;');
-                  debugPrint("$current_timer");
-                  if (current_timer is double){
-                    if (current_timer<0.6 && !trigger){
+                Timer? timer =Timer.periodic(Duration(milliseconds: 800), (timer) async {
+                  var currentTimer= await controller.runJavaScriptReturningResult('document.querySelector("video").currentTime;');
+                  debugPrint("$currentTimer");
+                  if (currentTimer is double){
+                    if (!trigger){
                       trigger=true;
-                      controller.runJavaScript('document.querySelector("video").pause();',);
+                      if (currentTimer>1){
+                        controller.runJavaScript('document.querySelector("video").currentTime=0;',);
+                        currentTimer=0;
+                      }
                     }
-                    if (current_timer>urllist[play_count][1]){
+                    if (currentTimer>shuffled_urllist[play_count][1]){
                       play_count++;
                       if (play_count>=urllist.length){
                         play_count=0;
                       }
-                      controller.loadRequest(Uri.parse(urllist[play_count][0]));
+                      controller.loadRequest(Uri.parse(shuffled_urllist[play_count][0]));
                       timer.cancel();
                     }
-                  }  // トリガーが true の間は関数を実行
+                  }
                 });
               }
             }
@@ -127,119 +128,73 @@ class InitPageState extends State<InitPage> {
         );
   }
 
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
 
-    Future<void> pickFile() async {
-
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-        allowMultiple: false,
-        withData: true,
-      );
-
-      if (result!=null){
-        PlatformFile file = result.files.first;
-        setState(() {
-          fileName = file.name; // ファイル名を保存
-        });
-
-        // Excelファイルを読み取る
-        Uint8List? fileBytes = file.bytes;
-        if (fileBytes != null){
-          try {
-            final Excel excel = Excel.decodeBytes(fileBytes);
-            Map<String, List<List<dynamic>>> tempData = {};
-
-            // Excelファイル内のデータを読み取る
-            for (var table in excel.tables.keys) {
-              List<List<dynamic>> rows = [];
-
-              for (var row in excel.tables[table]!.rows) {
-                List<dynamic> convertedRow = [];
-
-                for (int colIndex = 0; colIndex < row.length; colIndex++) {
-                  var cell = row[colIndex];
-                  if (cell?.value != null) {
-                    var value = cell?.value;
-                    if (colIndex==0){
-                      convertedRow.add(value.toString());
-                    }else{
-                      convertedRow.add(value);
-                    }
-                  
-                  } else {
-                    convertedRow.add("");  // セルがnullの場合は空文字列を追加
-                  }
-                }
-                bool isEmptyRow = (convertedRow[0]=="" || convertedRow[1]=="" || convertedRow[2]=="");
-                if (!isEmptyRow) {
-                  rows.add(convertedRow);
-                }
-              }
-              debugPrint("$rows");
-              tempData[table] = rows; // シート名をキーにしてデータを保存
-            }
-
-            setState(() {
-              excelData = tempData; // ファイル内容を保存
-              sheetnum = tempData.keys.length;
-              isload=true;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(snackBar);
-
-          }catch (e, stackTrace) {
-            debugPrint("読み込めませんでした");
-          }
-          
-        }else{
-          debugPrint("読み込めませんでした");
-        }
-      }
-
-      debugPrint("読み込めませんでした");
-
+    List<List<dynamic>> GetURLList(eList,count){
+      return eList[eList.keys.elementAt(count)];
     }
 
-    
+    List<List<dynamic>> shufflePlaylistWithRandomValues(List<List<dynamic>> urllist) {
+      var random = Random();
+
+      debugPrint("$urllist");
+      // 各要素についてランダムな値を生成
+      List<List<dynamic>> newurllist = urllist.map((item) {
+        double randomValue = random.nextDouble() * (item[2].value - item[1].value) + item[1].value; // item[1] と item[2] の間のランダムな値
+        return [item[0], randomValue];
+      }).toList();
+
+      // リストをシャッフル
+      newurllist.shuffle(random);
+
+      return newurllist;
+    } 
+
+    void FilePick()async{
+      var result= await pickFile();
+      setState(() {
+        file_pick_result = result;
+        snack_message=result.message;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(snack_message),
+          //action: SnackBarAction(label: 'Undo',onPressed: () {},),
+        ));
+    }
+
+    void StartMusic()async{
+      setState(() {
+        isplay=true;
+      });
+      urllist=GetURLList(file_pick_result.data,sheet_count);
+      shuffled_urllist=shufflePlaylistWithRandomValues(urllist);
+      debugPrint("$shuffled_urllist");
+      controller.loadRequest(Uri.parse(shuffled_urllist[play_count][0]));
+    }
 
     return Scaffold(
       appBar: AppBar(
         backgroundColor: MyColor.primary,
-        title: Text("$url_now：$sec_now"),
+        title: Text("AutoPlayer"),
         actions: [
-          Visibility(
-                visible: isload,
-                child:IconButton(
-                  onPressed: ()async{
-                    final cookies = await controller.runJavaScriptReturningResult(
-                      'document.cookie',
-                    );
-                    debugPrint("$cookies");
-                    setState(() {
-                      isplay=true;
-                    });
-                    play_count++;
-                    controller.loadRequest(Uri.parse(urllist[play_count][0]));
-                  }, 
-                  icon: Icon(Icons.play_arrow_outlined)
-                )
-          ),
-          IconButton(onPressed: pickFile, icon: Icon(Icons.file_copy)),
+          StartMusicButton(file_pick_result.success, StartMusic),
+          FilePickButton(FilePick),
           ],
       ),
       body: Center(
-        child:Column(
-          mainAxisAlignment:MainAxisAlignment.center,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Expanded(
-              child: isload
-              ?WebViewWidget(controller: controller,)
-              :Text("ファイルを選択してください"),
-            ),
+            file_pick_result.success
+              ? Expanded(
+                  child: WebViewWidget(controller: controller),
+                )
+              : Text("ファイルを選択してください"),
           ],
         ),
       ),
