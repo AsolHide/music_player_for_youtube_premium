@@ -112,7 +112,7 @@ class InitPageState extends State<InitPage> {
   void update_appbar_status(){
     if (isplay){
       setState(() {
-        appbar_message=file_pick_result.data.keys.elementAt(sheet_count)+"（"+(play_count+1).toString()+"/"+shuffled_urllist.length.toString()+"）";
+        appbar_message="${file_pick_result.data.keys.elementAt(sheet_count)}（${play_count+1}/${shuffled_urllist.length}）";
         if (appbar_message.length>15){
           appbar_message_size=375.0/appbar_message.length;
         }else{
@@ -137,16 +137,28 @@ class InitPageState extends State<InitPage> {
         ..setNavigationDelegate(
           NavigationDelegate(
             onPageFinished: (String url) async {
-              timer?.cancel();
+              timer.cancel();
               if (!isautoplay){
                 controller.runJavaScript("""document.querySelector("video").pause();""");//自動再生オフにしたい場合はこれ！
               }
+
+              Future<double> getDuration()async{
+                Object result= await controller.runJavaScriptReturningResult('document.querySelector("video").duration.toString();');
+                // 結果を String に変換し、不要な文字を削除
+                String durationStr = result.toString().replaceAll(RegExp(r'[^0-9.]'), '');
+
+                // String を double に変換
+                return double.tryParse(durationStr) ?? 0.0;
+              }
+
               if (isplay){
                 trigger=false;
                 timer = Timer.periodic(Duration(milliseconds: 800), (timer) async {
                   if (!isplay){
                     timer.cancel();
                   }
+                  double duration = await getDuration();
+                  debugPrint("/////$duration/////"*100);
                   var currentTimer= await controller.runJavaScriptReturningResult('document.querySelector("video").currentTime;');
                   debugPrint("$currentTimer");
                   if (currentTimer is double){
@@ -157,8 +169,8 @@ class InitPageState extends State<InitPage> {
                         currentTimer=0;
                       }
                     }
-                    if (currentTimer>shuffled_urllist[play_count][1]){
-                      timer.cancel();
+
+                    void NextMusic(){
                       play_count++;
                       if (play_count>=urllist.length){//曲が最後まで言ったら
                         play_count=0;
@@ -174,15 +186,22 @@ class InitPageState extends State<InitPage> {
                       }
                       //次に流す曲の情報を更新
                       update_appbar_status();
-
                       controller.loadRequest(Uri.parse(shuffled_urllist[play_count][0]));
+                    }
+                    
+                    if (currentTimer>shuffled_urllist[play_count][1] || (duration!=0.0 && duration-1.6<currentTimer)){
+                      timer.cancel();
+                      NextMusic();
                     }
                   }
                 });
               }
             }
           )
+
+          
         );
+      
   }
 
 
